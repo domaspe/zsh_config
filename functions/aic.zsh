@@ -7,12 +7,46 @@ aic() {
     fi
 
     local push_after_commit=0
-    local prompt message confirmation
+    local prompt message confirmation backend
     local exit_status
+    local -a generate_command
 
     if [[ "$1" == "-p" ]]; then
         push_after_commit=1
     fi
+
+    prompt='Generate a git commit message for these staged changes.
+Use only the staged diff provided via stdin. Do not use tools, inspect files, or ask follow-up questions.
+Use conventional commit format (feat/fix/refactor/etc). Subject line, blank line, then a short body.
+Lead with what changed and why. Describe intent and outcome, not file-by-file or symbol-by-symbol edits.
+Call out behavior changes that affect existing code paths or data; these are more important than new feature details.
+Keep similar-sounding identifiers distinct and preserve technical terms verbatim.
+Only include bullets when they add information the lead does not imply. Prefer no bullets over repetition.
+Use plain English, complete sentences, and no filler, hedging, or idioms.
+Output ONLY the commit message text, without quotes or backticks.'
+
+    backend="${AIC_BACKEND:-opencode}"
+
+    case "$backend" in
+        opencode)
+            generate_command=(opencode run --model deepseek/deepseek-v4-flash "$prompt")
+            ;;
+        claude)
+            generate_command=(
+                claude --print
+                --model haiku
+                --safe-mode
+                --no-session-persistence
+                --tools ""
+                --system-prompt 'You write git commit messages. Output only the commit message.'
+                -- "$prompt"
+            )
+            ;;
+        *)
+            print -u2 -- "Unknown AIC_BACKEND: $backend (expected 'claude' or 'opencode')."
+            return 2
+            ;;
+    esac
 
     git rev-parse --show-toplevel >/dev/null 2>&1
     exit_status=$?
@@ -35,17 +69,7 @@ aic() {
         return "$exit_status"
     fi
 
-    prompt='Generate a git commit message for these staged changes.
-Use only the staged diff provided via stdin. Do not use tools, inspect files, or ask follow-up questions.
-Use conventional commit format (feat/fix/refactor/etc). Subject line, blank line, then a short body.
-Lead with what changed and why. Describe intent and outcome, not file-by-file or symbol-by-symbol edits.
-Call out behavior changes that affect existing code paths or data; these are more important than new feature details.
-Keep similar-sounding identifiers distinct and preserve technical terms verbatim.
-Only include bullets when they add information the lead does not imply. Prefer no bullets over repetition.
-Use plain English, complete sentences, and no filler, hedging, or idioms.
-Output ONLY the commit message text, without quotes or backticks.'
-
-    message="$(git diff --cached -- | opencode run --model deepseek/deepseek-v4-flash "$prompt")"
+    message="$(git diff --cached -- | "${generate_command[@]}")"
     exit_status=$?
 
     if (( exit_status != 0 )); then
@@ -54,7 +78,7 @@ Output ONLY the commit message text, without quotes or backticks.'
     fi
 
     if [[ -z "${message//[[:space:]]/}" ]]; then
-        print -u2 -- "OpenCode returned an empty commit message."
+        print -u2 -- "$backend returned an empty commit message."
         return 1
     fi
 
