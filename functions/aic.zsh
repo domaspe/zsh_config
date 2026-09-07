@@ -1,19 +1,26 @@
 aic() {
     setopt localoptions pipefail
 
-    if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != "-p" ]] }; then
-        print -u2 -- "Usage: aic [-p]"
-        return 2
-    fi
-
     local push_after_commit=0
-    local prompt message confirmation backend
+    local skip_confirmation=0
+    local prompt message backend option
     local exit_status
     local -a generate_command
 
-    if [[ "$1" == "-p" ]]; then
-        push_after_commit=1
-    fi
+    for option in "$@"; do
+        case "$option" in
+            -p)
+                push_after_commit=1
+                ;;
+            -y)
+                skip_confirmation=1
+                ;;
+            *)
+                print -u2 -- "Usage: aic [-p] [-y]"
+                return 2
+                ;;
+        esac
+    done
 
     prompt='Generate a git commit message for these staged changes.
 Use only the staged diff provided via stdin. Do not use tools, inspect files, or ask follow-up questions.
@@ -86,14 +93,14 @@ Output ONLY the commit message text, without quotes or backticks.'
     print -r -- "$message"
     print
 
-    if ! read -r "confirmation?Commit this message? [y/N] "; then
-        print -- "Commit cancelled."
-        return 1
-    fi
+    if (( ! skip_confirmation )); then
+        if ! read -q "confirmation?Commit this message? [y/N] "; then
+            print
+            print -- "Commit cancelled."
+            return 1
+        fi
 
-    if [[ "$confirmation" != [yY] ]]; then
-        print -- "Commit cancelled."
-        return 1
+        print
     fi
 
     git commit --file=- --cleanup=verbatim <<< "$message"
